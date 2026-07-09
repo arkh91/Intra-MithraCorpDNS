@@ -1,0 +1,56 @@
+name: Build and Upload to TestFlight
+
+# Usage: triggers automatically on every push to main. Lets you rebuild
+# and re-distribute the app entirely by pushing from the GitHub app on
+# your iPhone — no local Mac needed for this step.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_15.4.app
+
+      - name: Install fastlane
+        run: gem install fastlane bundler
+
+      # Pulls signing certs/profiles from your private fastlane-match repo
+      # (set up once per SETUP.md step 6) instead of a local keychain.
+      - name: Fetch signing certificates via match
+        env:
+          MATCH_GIT_URL: ${{ secrets.MATCH_GIT_URL }}
+          MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
+        run: |
+          fastlane match appstore --readonly \
+            --git_url "$MATCH_GIT_URL" \
+            --password "$MATCH_PASSWORD"
+
+      - name: Build archive
+        run: |
+          xcodebuild -project IntraDNS.xcodeproj \
+            -scheme IntraDNS \
+            -configuration Release \
+            -archivePath build/IntraDNS.xcarchive \
+            archive
+
+      - name: Export IPA
+        run: |
+          xcodebuild -exportArchive \
+            -archivePath build/IntraDNS.xcarchive \
+            -exportPath build/export \
+            -exportOptionsPlist ExportOptions.plist
+
+      - name: Upload to TestFlight
+        env:
+          APP_STORE_CONNECT_API_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY }}
+        run: |
+          xcrun altool --upload-app \
+            --type ios \
+            --file build/export/IntraDNS.ipa \
+            --apiKey "$APP_STORE_CONNECT_API_KEY"
